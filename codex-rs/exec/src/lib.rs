@@ -234,6 +234,7 @@ struct ExecRunArgs {
     managed_worktree: Option<ManagedExecWorktree>,
     oss: bool,
     output_schema_path: Option<PathBuf>,
+    tool_allowlist: Option<Vec<String>>,
     prompt: Option<String>,
     skip_git_repo_check: bool,
     stderr_with_ansi: bool,
@@ -284,6 +285,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         json: json_mode,
         prompt,
         output_schema: output_schema_path,
+        tool_allowlist: tool_allowlist_path,
         mut config_overrides,
     } = cli;
     if cyber_access_program.is_some() {
@@ -297,6 +299,14 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             Some(ExecCommand::Resume(_) | ExecCommand::Fork(_)) | None => {}
         }
     }
+    let tool_allowlist = if let Some(path) = tool_allowlist_path {
+        anyhow::ensure!(command.is_none(), "--tool-allowlist requires a new thread");
+        anyhow::ensure!(ephemeral, "--tool-allowlist requires --ephemeral");
+        let contents = std::fs::read_to_string(&path)?;
+        Some(serde_json::from_str::<Vec<String>>(&contents)?)
+    } else {
+        None
+    };
     let mut shared = shared.into_inner();
     shared.take_auto_review_config_overrides(&mut config_overrides);
     let SharedCliOptions {
@@ -766,6 +776,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         managed_worktree,
         oss,
         output_schema_path,
+        tool_allowlist,
         prompt,
         skip_git_repo_check,
         stderr_with_ansi,
@@ -868,6 +879,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         managed_worktree,
         oss,
         output_schema_path,
+        tool_allowlist,
         prompt,
         skip_git_repo_check,
         stderr_with_ansi,
@@ -1055,9 +1067,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 .unwrap_or(false);
             (session_configured.thread_id, session_configured)
         } else {
-            let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-                .await
-                .map_err(anyhow::Error::msg)?;
+            let response = start_thread(
+                &client,
+                &mut request_ids,
+                &config,
+                &thread_source,
+                tool_allowlist.as_ref(),
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
             let session_configured =
                 session_configured_from_thread_start_response(&response, &config)
                     .map_err(anyhow::Error::msg)?;
@@ -1151,9 +1169,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             .unwrap_or(false);
         (session_configured.thread_id, session_configured)
     } else {
-        let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-            .await
-            .map_err(anyhow::Error::msg)?;
+        let response = start_thread(
+            &client,
+            &mut request_ids,
+            &config,
+            &thread_source,
+            tool_allowlist.as_ref(),
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         let session_configured = session_configured_from_thread_start_response(&response, &config)
             .map_err(anyhow::Error::msg)?;
         (session_configured.thread_id, session_configured)
@@ -1413,8 +1437,10 @@ async fn start_thread(
     request_ids: &mut RequestIdSequencer,
     config: &Config,
     thread_source: &ThreadSource,
+    tool_allowlist: Option<&Vec<String>>,
 ) -> Result<ThreadStartResponse, String> {
     let mut params = thread_start_params_from_config(config, thread_source);
+    params.allowed_tools = tool_allowlist.cloned();
     loop {
         match client
             .request_typed(ClientRequest::ThreadStart {

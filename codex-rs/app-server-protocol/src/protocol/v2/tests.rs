@@ -2245,6 +2245,25 @@ fn config_requirements_read_accepts_foreign_path_uris() {
 }
 
 #[test]
+fn thread_start_allowed_tools_is_experimental_and_distinguishes_empty_from_absent() {
+    let params = ThreadStartParams {
+        ephemeral: Some(true),
+        allowed_tools: Some(Vec::new()),
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::experimental_api::ExperimentalApi::experimental_reason(&params),
+        Some("thread/start.allowedTools")
+    );
+    let value = serde_json::to_value(&params).expect("serialize thread/start params");
+    assert_eq!(value["allowedTools"], serde_json::json!([]));
+    let restored: ThreadStartParams =
+        serde_json::from_value(value).expect("deserialize thread/start params");
+    assert_eq!(restored.allowed_tools, Some(Vec::new()));
+    assert_eq!(ThreadStartParams::default().allowed_tools, None);
+}
+
+#[test]
 fn client_request_thread_start_granular_approval_policy_is_marked_experimental() {
     let reason = crate::experimental_api::ExperimentalApi::experimental_reason(
         &crate::ClientRequest::ThreadStart {

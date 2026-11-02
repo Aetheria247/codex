@@ -149,6 +149,11 @@ pub struct ThreadStartParams {
     )]
     #[ts(optional = nullable)]
     pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
+    /// Startup tool ceiling for an ephemeral thread. Names use "namespace/name".
+    /// An empty array denies all tools.
+    #[experimental("thread/start.allowedTools")]
+    #[ts(optional = nullable)]
+    pub allowed_tools: Option<Vec<String>>,
     /// Capability roots selected for this thread by the hosting platform.
     #[experimental("thread/start.selectedCapabilityRoots")]
     #[ts(optional = nullable)]

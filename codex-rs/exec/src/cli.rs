@@ -49,6 +49,11 @@ pub struct Cli {
     #[arg(long = "ignore-rules", global = true, default_value_t = false)]
     pub ignore_rules: bool,
 
+    /// JSON array of namespaced tools (for example, "mcp__broker/run").
+    /// Requires --ephemeral and a new thread. Empty array denies all tools.
+    #[arg(long = "tool-allowlist", value_name = "FILE", global = true)]
+    pub tool_allowlist: Option<PathBuf>,
+
     /// Path to a JSON Schema file describing the model's final response shape.
     #[arg(long = "output-schema", value_name = "FILE", global = true)]
     pub output_schema: Option<PathBuf>,
