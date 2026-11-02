@@ -3,6 +3,28 @@ use codex_thread_store::ThreadStoreError;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn tool_allowlist_names_are_explicit_and_unambiguous() {
+    use codex_protocol::ToolName;
+
+    assert_eq!(
+        super::parse_allowed_tool_name("mcp__god_broker/run".to_owned()).unwrap(),
+        ToolName::namespaced("mcp__god_broker", "run")
+    );
+    for invalid in [
+        "exec",
+        "functions/",
+        "/run",
+        "functions/exec/more",
+        "functions/exec command",
+    ] {
+        assert!(
+            super::parse_allowed_tool_name(invalid.to_owned()).is_err(),
+            "accepted {invalid}"
+        );
+    }
+}
+
+#[test]
 fn storage_failure_classification_does_not_change_mutation_error_policy() {
     for error in [
         ThreadStoreError::Internal {

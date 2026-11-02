@@ -148,18 +148,23 @@ pub(crate) fn build_tool_router(
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
     add_core_tool_sources(&context, &mut registry);
 
+    let search_tool_enabled = model_info.supports_search_tool
+        && session
+            .tool_policy
+            .allows(&ToolName::plain(TOOL_SEARCH_TOOL_NAME));
     let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
         mcp,
         &turn_context.config,
         apps_enabled,
         &mcp.config().mcp_server_catalog,
-        model_info.supports_search_tool,
+        search_tool_enabled,
         session.services.mcp_manager.shared_definitions(),
         &mut registry,
     );
     apply_mcp_tool_exposure_policy(
         turn_context,
         model_info,
+        search_tool_enabled,
         mcp,
         &registered_mcp_tools,
         &mut registry,
@@ -198,6 +203,7 @@ fn code_mode_only_strict_3p_tools(turn_context: &TurnContext, model_info: &Model
 fn apply_mcp_tool_exposure_policy(
     turn_context: &TurnContext,
     model_info: &ModelInfo,
+    search_tool_enabled: bool,
     mcp: &codex_mcp::McpBinding,
     registered_mcp_tools: &HashSet<ToolName>,
     registry: &mut ToolRegistry,
@@ -263,7 +269,7 @@ fn apply_mcp_tool_exposure_policy(
             exposures = exposures.difference(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
         }
 
-        exposures = if model_info.supports_search_tool
+        exposures = if search_tool_enabled
             && exposures.contains(ToolExposures::DEFERRED)
             && (effective_tool_mode(turn_context, model_info) != ToolMode::CodeModeOnly
                 || exposures.contains(ToolExposures::CODE_MODE))

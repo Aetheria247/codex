@@ -33,7 +33,9 @@ use codex_app_server_protocol::ThreadSectionMoveResponse;
 use codex_config::types::WindowsSandboxModeToml;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::ThreadIdleCause;
+use codex_extension_api::ToolPolicy;
 use codex_protocol::SanitizedGitUrl;
+use codex_protocol::ToolName;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
@@ -42,6 +44,23 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::PersistContext;
 use std::ops::ControlFlow;
+
+/// Parse the public allowlist without permitting empty or ambiguous names.
+fn parse_allowed_tool_name(value: String) -> Result<ToolName, JSONRPCErrorError> {
+    let Some((namespace, name)) = value.split_once('/') else {
+        return Err(invalid_request(
+            "allowedTools entries must use namespace/name",
+        ));
+    };
+    if namespace.is_empty()
+        || name.is_empty()
+        || name.contains('/')
+        || value.chars().any(char::is_whitespace)
+    {
+        return Err(invalid_request("invalid allowedTools entry"));
+    }
+    Ok(ToolName::namespaced(namespace, name))
+}
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
@@ -1206,6 +1225,7 @@ impl ThreadRequestProcessor {
             base_instructions,
             developer_instructions,
             dynamic_tools,
+            allowed_tools,
             selected_capability_roots,
             mock_experimental_field: _mock_experimental_field,
             experimental_raw_events,
@@ -1228,6 +1248,17 @@ impl ThreadRequestProcessor {
                 "paginated threads require thread/turns/list and thread/items/list support",
             ));
         }
+        if allowed_tools.is_some() && ephemeral != Some(true) {
+            return Err(invalid_request("allowedTools requires an ephemeral thread"));
+        }
+        let allowed_tools = allowed_tools
+            .map(|names| {
+                names
+                    .into_iter()
+                    .map(parse_allowed_tool_name)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
         if sandbox.is_some() && permissions.is_some() {
             return Err(invalid_request(
                 "`permissions` cannot be combined with `sandbox`",
@@ -1297,6 +1328,7 @@ impl ThreadRequestProcessor {
                 config,
                 typesafe_overrides,
                 dynamic_tools,
+                allowed_tools,
                 selected_capability_roots.unwrap_or_default(),
                 history_mode.map(Into::into),
                 session_start_source,
@@ -1379,6 +1411,7 @@ impl ThreadRequestProcessor {
         config_overrides: Option<HashMap<String, serde_json::Value>>,
         typesafe_overrides: ConfigOverrides,
         dynamic_tools: Option<Vec<DynamicToolSpec>>,
+        allowed_tools: Option<Vec<ToolName>>,
         selected_capability_roots: Vec<SelectedCapabilityRoot>,
         history_mode: Option<ThreadHistoryMode>,
         session_start_source: Option<codex_app_server_protocol::ThreadStartSource>,
@@ -1520,6 +1553,12 @@ impl ThreadRequestProcessor {
                 .then_some(ThreadHistoryMode::Paginated)
         });
         let mut thread_extension_init = ExtensionDataInit::new();
+        if let Some(allowed_tools) = allowed_tools {
+            thread_extension_init.insert(ToolPolicy {
+                allowed_tools: Some(allowed_tools),
+                ..Default::default()
+            });
+        }
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
